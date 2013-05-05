@@ -1,0 +1,9 @@
+{
+  "name": "andamiojs",
+  "version": "1.0.0",
+  "main": "./backbone.andamio.js",
+  "dependencies" : {
+    "jquery" : "~1.9.0",
+    "backbone" : "~1.0.0"
+  }
+}
