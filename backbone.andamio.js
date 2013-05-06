@@ -1,5 +1,5 @@
 /*!
- * backbone.andamio v1.2.1 - 2013-05-06
+ * backbone.andamio v1.2.3 - 2013-05-06
  * http://andamiojs.com
  * Copyright (c) 2013 Denis Ciccale (@tdecs)
  * Released under the MIT license
@@ -105,7 +105,6 @@ _.extend(Andamio.Region, {
   constructor: function () {
     _.bindAll(this);
     Backbone.View.apply(this, arguments);
-    this._bindSubviews();
   },
 
   render: function () {
@@ -158,92 +157,55 @@ _.extend(Andamio.Region, {
       return;
     }
 
-    // delete all of the existing ui bindings
+    // delete region bindings
     this._deleteProp('regions');
-    this.regions = {};
   },
 
   _bindUIElements: function () {
-    this._bindProp('ui', function (bindings, prop, key) {
-      this[prop][key] = this.$(bindings[key]);
-    });
+    if (!this.ui) {
+      return;
+    }
+
+    if (!this._ui) {
+      this._ui = this.ui;
+    }
+
+    this.ui = {};
+
+    _.each(_.keys(this._ui), function (key) {
+      this.ui[key] = this.$(this._ui[key]);
+    }, this);
   },
 
   // this method unbinds the elements specified in the "ui" hash
   _unbindUIElements: function () {
-    this._unbindProp('ui');
-  },
-
-  _bindSubviews: function () {
-    this._bindProp('subviews', function (bindings, prop, key) {
-      this[prop][key] = bindings[key];
-    });
-  },
-
-  _unbindSubviews: function () {
-    this._unbindProp('subviews');
-  },
-
-  _unbindProp: function (prop) {
-    var _prop = '_' + prop;
-    if (!this[prop]) {
+    if (!this.ui) {
       return;
     }
 
-    this._deleteProp(prop);
-    this[prop] = this[_prop];
-    delete this[_prop];
-  },
-
-  // bind property hash saving default config
-  _bindProp: function (prop, callback) {
-    var _prop = '_' + prop;
-
-    if (!this[prop]) {
-      return;
-    }
-
-    if (!this[_prop]) {
-      this[_prop] = this[prop];
-    }
-
-    var bindings = _.result(this, _prop);
-
-    this[prop] = {};
-
-    _.each(_.keys(bindings), function (key) {
-      callback.call(this, bindings, prop, key);
-    }, this);
+    this._deleteProp('ui');
+    this.ui = this._ui;
+    delete this._ui;
   },
 
   _removeSubviews: function () {
-    _.each(this.subviews, function (view) {
-      view.close();
-    });
+    if (!this.subviews) {
+      return;
+    }
+    _.invoke(this.subviews, 'close');
+    this._deleteProp('subviews');
   },
 
-  _deleteProp: function (prop, callback) {
-    var obj = this[prop];
-    _.each(obj, function (item, name) {
-      if (callback) {
-        callback.call(this, item, name);
-      }
-      delete obj[name];
-    }, this);
-    delete this[prop];
-  },
-
+  // clean up the view and remove from DOM
   close: function () {
     if (this.isClosed) {
       return;
     }
     this.isClosed = true;
 
-    // remove sub views
+    // remove subviews
     this._removeSubviews();
-
-    // unbind region and ui elements
-    this._unbindSubviews();
+    // unbind regions and ui
     this._unbindRegions();
     this._unbindUIElements();
 
@@ -263,6 +225,15 @@ _.extend(Andamio.Region, {
     Backbone.View.prototype.undelegateEvents.apply(this, arguments);
     Andamio.unbindEvents(this, this.model, this.modelEvents);
     Andamio.unbindEvents(this, this.collection, this.collectionEvents);
+  },
+
+  // helper method to correctly delete properties
+  _deleteProp: function (prop) {
+    var obj = this[prop];
+    _.each(obj, function (item, name) {
+      delete obj[name];
+    }, this);
+    delete this[prop];
   }
 });
 
