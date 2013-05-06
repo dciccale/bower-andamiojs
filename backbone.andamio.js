@@ -1,5 +1,5 @@
 /*!
- * backbone.andamio v1.0.0 - 2013-05-05
+ * backbone.andamio v1.2.0 - 2013-05-06
  * http://andamiojs.com
  * Copyright (c) 2013 Denis Ciccale (@tdecs)
  * Released under the MIT license
@@ -10,14 +10,118 @@
 
   var Andamio = {
     // use default DOM library
-    $: Backbone.$
+    $: Backbone.$,
+
+    extend: Backbone.Model.extend
   };
+
+  (function (Andamio) {
+  // Bind the event to handlers specified as a string of
+  // handler names on the target object
+  function bindFromStrings(target, entity, evt, methods) {
+    var methodNames = methods.split(/\s+/);
+
+    _.each(methodNames,function (methodName) {
+
+      var method = target[methodName];
+      if(!method) {
+        throw new Error('Method "' + methodName + '" was configured as an event handler, but does not exist.');
+      }
+
+      target.listenTo(entity, evt, method, target);
+    });
+  }
+
+  // Bind the event to handlers specified as a string of
+  // handler names on the target object
+  function unbindFromStrings(target, entity, evt, methods) {
+    var methodNames = methods.split(/\s+/);
+
+    _.each(methodNames,function (methodName) {
+      /* jshint unused: vars */
+      var method = target[method];
+      target.stopListening(entity, evt, method, target);
+    });
+  }
+
+  // generic looping function
+  function iterateEvents(target, entity, bindings, stringCallback) {
+    if (!entity || !bindings) {
+      return;
+    }
+
+    // allow the bindings to be a function
+    if (_.isFunction(bindings)) {
+      bindings = bindings.call(target);
+    }
+
+    // iterate the bindings and bind them
+    _.each(bindings, function (methods, evt) {
+
+      // allow for a function as the handler,
+      // or a list of event names as a string
+      stringCallback(target, entity, evt, methods);
+
+    });
+  }
+
+  // Export Public API
+  Andamio.bindEvents = function (target, entity, bindings) {
+    iterateEvents(target, entity, bindings, bindFromStrings);
+  };
+
+  Andamio.unbindEvents = function (target, entity, bindings) {
+    iterateEvents(target, entity, bindings, unbindFromStrings);
+  };
+
+})(Andamio);
+
+  Andamio.Region = function (options) {
+  this.options = options || {};
+  this.$el = this.options.$el;
+};
+
+_.extend(Andamio.Region, {
+  show: function (view) {
+    this._ensureEl();
+    if (view !== this.currentView) {
+      this.close();
+      view.render();
+      this.open(view);
+    } else {
+      view.render();
+    }
+    this.currentView = view;
+    if (_.isFunction(this.onShow)) {
+      this.onShow();
+    }
+  },
+
+  open: function (view) {
+    this.$el.empty().append(view.el);
+  },
+
+  close: function () {
+    var view = this.currentView;
+    if (!view || view.isClosed) {
+      return;
+    }
+    view.close();
+    delete this.currentView;
+  },
+
+  _ensureEl: function () {
+    if (!this.$el || this.$el.length === 0) {
+      this.$el = $('[data-region="' + this.el + '"]');
+    }
+  }
+});
 
   Andamio.View = Backbone.View.extend({
   constructor: function () {
     _.bindAll(this);
-    this._bindSubviews();
     Backbone.View.apply(this, arguments);
+    this._bindSubviews();
   },
 
   render: function () {
@@ -37,19 +141,12 @@
   },
 
   _serializeData: function (data) {
-    data = this.model ? this.model.toJSON() : this.collection ? this.collection.toJSON() : data;
-    return this._mixinTemplateHelpers(data);
+    return this.model ? this.model.toJSON() : this.collection ? {items: this.collection.toJSON()} : data;
   },
 
   _bindRegions: function () {
     var view = this;
     var $regions = view.$('[data-region]');
-    var show = function ($el) {
-      return function (view) {
-        view.$el = $el;
-        view.render();
-      };
-    };
 
     if (!$regions.length) {
       return;
@@ -62,10 +159,12 @@
     $regions.each(function (i, el) {
       var $el = $(el);
       var key = $el.attr('data-region');
-      view.regions[key] = {$el: $el, show: show($el)};
-      // if a region matches with a subview, set view el for the view
-      if (view.subviews[key]) {
-        view.subviews[key].$el = $el;
+      var Subview = view.subviews[key];
+      // manage a new region
+      view.regions[key] = new Andamio.Region({$el: $el});
+      // find subview match to set the region
+      if (Subview) {
+        view.subviews[key] = new Subview({el: $el});
       }
     });
   },
@@ -92,7 +191,6 @@
   },
 
   _bindSubviews: function () {
-    // create hash of subviews (name: view)
     this._bindProp('subviews', function (bindings, prop, key) {
       this[prop][key] = bindings[key];
     });
@@ -135,8 +233,8 @@
   },
 
   _removeSubviews: function () {
-    this._deleteProp('subviews', function (view) {
-      view.remove();
+    _.each(this.subviews, function (view) {
+      view.close();
     });
   },
 
@@ -151,7 +249,7 @@
     delete this[prop];
   },
 
-  remove: function () {
+  close: function () {
     if (this.isClosed) {
       return;
     }
@@ -161,51 +259,96 @@
     this._removeSubviews();
 
     // unbind region and ui elements
+    this._unbindSubviews();
     this._unbindRegions();
     this._unbindUIElements();
 
-    // remove the view from the dom
+    // call backbone's remove
     this.remove();
   },
 
-  _mixinTemplateHelpers: function (target) {
-    target = target || {};
-    var templateHelpers = this.templateHelpers;
-    if (_.isFunction(templateHelpers)) {
-      templateHelpers = templateHelpers.call(this);
-    }
-    return _.extend(target, templateHelpers);
+  // override Backbone's delegateEvents to bind model and collection events
+  delegateEvents: function (events) {
+    Andamio.bindEvents(this, this.model, this.modelEvents);
+    Andamio.bindEvents(this, this.collection, this.collectionEvents);
+    Backbone.View.prototype.delegateEvents.call(this, events);
+  },
+
+  // override Backbone's undelegateEvents to unbind model and collection events
+  undelegateEvents: function () {
+    Backbone.View.prototype.undelegateEvents.apply(this, arguments);
+    Andamio.unbindEvents(this, this.model, this.modelEvents);
+    Andamio.unbindEvents(this, this.collection, this.collectionEvents);
   }
+});
+
+  Andamio.Model = Backbone.Model.extend({
+  constructor: function (attributes, options) {
+    this.configure(options);
+    Backbone.Model.apply(this, arguments);
+    this._mixinComputedProperties();
+  },
+
+  configure: function (options) {
+    _.extend(this.defaults, this.constructor.__super__.defaults);
+    this.options = options || {};
+    _.bindAll(this);
+  },
+
+  defaults: {
+    ready: false
+  },
+
+  isReady: function () {
+    return true;
+  },
+
+  _setReady: function () {
+    this.set('ready', true);
+  },
+
+  _mixinComputedProperties: function () {
+    var attributes = this.attributes || {};
+    return _.extend(attributes, this.computedProperties);
+  },
+
+  load: function () {}
 });
 
   Andamio.Router = Backbone.Router.extend({
   constructor: function (options) {
-    if (options.routes) {
-      this.routes = options.routes;
+    _.extend(this, options);
+    if (!this.viewsPath) {
+      throw new Error('Provide a correct path for the views in the "viewsPath" option.');
     }
     this._initRoutes();
+    this.initialize.apply(this, arguments);
   },
 
+  initialize: function () {},
+
+  // default view files path
   viewsPath: 'views/',
 
   _initRoutes: function () {
     _.each(this.routes, function (route) {
+      var url = route.url;
       var view = route.view;
-      var callback = this._routeCallback(view);
-      this.route(route.url, view, callback);
+      var callback = this._routeCallback(url, view);
+      this.route(url, view, callback);
     }, this);
   },
 
-  _routeCallback: function (view) {
+  _routeCallback: function (url, view) {
     var router = this;
     var callback = function () {
       var urlParams = arguments;
       require([router.viewsPath + view], function (View) {
         var _view = new View;
-        if (_.isFunction(_view.loadModel)) {
-          _view.loadModel.apply(_view, urlParams);
+        if (_view.model && _.isFunction(_view.model.load)) {
+          _view.model.load.apply(_view.model, urlParams);
         }
-        router.trigger('navigate', _view, name, urlParams);
+        router.trigger('navigate', _view, url, urlParams);
       });
     };
     return callback;
@@ -214,46 +357,37 @@
 
   Andamio.Application = function (options) {
   _.extend(this, options);
-  this.listenTo(this.router, 'navigate', this.show);
-  this.initialize.apply(this, arguments);
+  this.vent = _.extend({}, Backbone.Events);
 };
 
-_.extend(Andamio.Application.prototype, Backbone.Events, {
-  el: 'body',
+_.extend(Andamio.Application.prototype, Backbone.Events, Andamio.Region, {
+  container: 'body',
+
+  el: 'main',
 
   // starts the app
   start: function () {
+    this._initRouter();
+    this._initAppView();
     this.initialize.apply(this, arguments);
+    this.listenTo(this.router, 'navigate', this.show);
   },
 
   initialize: function () {},
 
-  show: function (view, name, urlParams) {
-    /* jshint unused: vars */
-    this._ensureEl();
-    if (view !== this.currentView) {
-      this._close();
-      view.render();
-    } else {
-      view.render();
-    }
-    this.currentView = view;
+  // initialize app router
+  _initRouter: function () {
+    this.router = new this.router();
   },
 
-  _ensureEl: function () {
-    if (!this.$el || this.$el.length === 0) {
-      this.$el = $(this.el);
-    }
+  // initialize app view
+  _initAppView: function () {
+    this.appView = new this.appView({el: this.container});
+    this.appView.render();
   },
 
-  _open: function (view) {
-    this.$el.empty().append(view.el);
-  },
-
-  _close: function () {
-    if (this.currentView) {
-      this.currentView.remove();
-    }
+  onShow: function () {
+    this.appView.trigger('navigate', this.currentView);
   }
 });
 
