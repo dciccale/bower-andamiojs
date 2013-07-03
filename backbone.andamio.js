@@ -1,5 +1,5 @@
 /*!
- * backbone.andamio v1.2.3 - 2013-05-06
+ * backbone.andamio v1.2.4 - 2013-05-24
  * http://andamiojs.com
  * Copyright (c) 2013 Denis Ciccale (@tdecs)
  * Released under the MIT license
@@ -104,13 +104,19 @@ _.extend(Andamio.Region, {
   Andamio.View = Backbone.View.extend({
   constructor: function () {
     _.bindAll(this);
+    if (this.model) {
+      this.model = new this.model;
+    }
+    if (this.collection) {
+      this.collection = new this.collection;
+    }
     Backbone.View.apply(this, arguments);
   },
 
   render: function () {
     this.isClosed = false;
 
-    var data = this._serializeData(data);
+    var data = this._serializeData();
     this.$el.html(this.template(data));
 
     this._bindRegions();
@@ -123,8 +129,8 @@ _.extend(Andamio.Region, {
     return this;
   },
 
-  _serializeData: function (data) {
-    return this.model ? this.model.toJSON() : this.collection ? {items: this.collection.toJSON()} : data;
+  _serializeData: function () {
+    return this.model ? this.model.toJSON() : this.collection ? {items: this.collection.toJSON()} : {};
   },
 
   _bindRegions: function () {
@@ -146,8 +152,10 @@ _.extend(Andamio.Region, {
       // manage a new region
       view.regions[key] = new Andamio.Region({$el: $el});
       // find subview match to set the region
-      if (Subview) {
+      if (Subview && _.isFunction(Subview)) {
         view.subviews[key] = new Subview({el: $el});
+      } else if (Subview) {
+        Subview.setElement($el).render();
       }
     });
   },
@@ -215,9 +223,9 @@ _.extend(Andamio.Region, {
 
   // override Backbone's delegateEvents to bind model and collection events
   delegateEvents: function (events) {
+    Backbone.View.prototype.delegateEvents.call(this, events);
     Andamio.bindEvents(this, this.model, this.modelEvents);
     Andamio.bindEvents(this, this.collection, this.collectionEvents);
-    Backbone.View.prototype.delegateEvents.call(this, events);
   },
 
   // override Backbone's undelegateEvents to unbind model and collection events
@@ -254,19 +262,30 @@ _.extend(Andamio.Region, {
     ready: false
   },
 
+  // simple way to know if a model is raedy
+  // usefule for showing a loading component
   isReady: function () {
     return true;
   },
 
+  // shortcut for telling the model is ready
   _setReady: function () {
     this.set('ready', true);
   },
 
+  /* extend model attributes with computed properties
+   * computedProperties: {
+   *   fullName: function () {
+   *     return this.name + ' ' + this.last;
+   *   }
+   * }
+   */
   _mixinComputedProperties: function () {
     var attributes = this.attributes || {};
     return _.extend(attributes, this.computedProperties);
   },
 
+  // default function to be called from the router recieving url params
   load: function () {}
 });
 
@@ -316,15 +335,18 @@ _.extend(Andamio.Region, {
 };
 
 _.extend(Andamio.Application.prototype, Backbone.Events, Andamio.Region, {
-  container: 'body',
+  // selector where the main appview will be rendered
+  container: 'main',
 
-  el: 'main',
+  // data-region where every page will be displayed
+  el: 'page',
 
   // starts the app
-  start: function () {
+  start: function (options) {
+    _.extend(this, options);
     this._initRouter();
-    this._initAppView();
     this.initialize.apply(this, arguments);
+    this._initAppView();
     this.listenTo(this.router, 'navigate', this.show);
   },
 
@@ -333,6 +355,12 @@ _.extend(Andamio.Application.prototype, Backbone.Events, Andamio.Region, {
   // initialize app router
   _initRouter: function () {
     this.router = new this.router();
+    Backbone.history.start();
+    // navigate to default route
+    var defaultRoute = _.findWhere(this.router.routes, {default: true});
+    if (defaultRoute && !Backbone.history.fragment) {
+      this.router.navigate(defaultRoute.url, {trigger: true, replace: true});
+    }
   },
 
   // initialize app view
@@ -342,7 +370,7 @@ _.extend(Andamio.Application.prototype, Backbone.Events, Andamio.Region, {
   },
 
   onShow: function () {
-    this.appView.trigger('navigate', this.currentView);
+    this.vent.trigger('navigate', this.currentView);
   }
 });
 
