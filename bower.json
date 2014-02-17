@@ -1,9 +1,13 @@
 {
   "name": "andamiojs",
-  "version": "1.2.5",
+  "description": "A mini framework to ease the develop of your Backbone.js apps.",
+  "version": "1.2.7",
+  "author": "Denis Ciccale (@tdecs)",
+  "homepage": "http://andamiojs.com",
   "main": "./backbone.andamio.js",
   "dependencies" : {
     "jquery" : "~1.9.0",
     "backbone" : "~1.0.0"
-  }
+  },
+  "keywords": ["backbone", "andamio", "plugin", "single", "page", "app"]
 }
